@@ -1,9 +1,9 @@
-from .base_metric import BaseMetric
+from ..base_metric import BaseMetric
 from models.laya_model import LayaModel
 from evaluation_result import EvaluationResult
 
 
-class CorrectnessMetric(BaseMetric):
+class FaithfulnessMetric(BaseMetric):
 
     def __init__(self, scoring_strategy=None, diagnostics=None, passing_strategy=None, model=None):
         self.model = model or LayaModel()
@@ -13,28 +13,39 @@ class CorrectnessMetric(BaseMetric):
 
     def measure(self, evaluation_case):
 
+        if not evaluation_case.retrieval_context:
+            raise ValueError(
+                "FaithfulnessMetric requires retrieval_context."
+            )
+
         state = {
             "question": evaluation_case.input,
-            "expected_answer": evaluation_case.expected_output,
             "actual_answer": evaluation_case.actual_output,
+            "retrieval_context": evaluation_case.retrieval_context,
         }
 
         questions = {
-            "correctness": {
+            "faithfulness": {
                 "type": "choice",
                 "instructions": (
-                    "Evaluate the correctness of the generated answer "
-                    "compared with the expected answer."
+                    "Evaluate whether the claims in the generated answer "
+                    "are supported by the retrieved context."
                 ),
                 "criteria": {
-                    "fully_correct": (
-                        "The generated answer is completely correct."
+                    "fully_faithful": (
+                        "The claims in the generated answer are fully supported "
+                        "by the retrieved context. The answer does not introduce "
+                        "unsupported factual claims."
                     ),
-                    "partially_correct": (
-                        "The generated answer is partially correct."
+                    "partially_faithful": (
+                        "The generated answer is partially supported by the "
+                        "retrieved context, but contains one or more claims that "
+                        "are unsupported, incomplete, or only partially supported."
                     ),
-                    "incorrect": (
-                        "The generated answer is incorrect."
+                    "unfaithful": (
+                        "The generated answer contains claims that are not "
+                        "supported by the retrieved context or substantially "
+                        "contradicts the retrieved context."
                     ),
                 },
             }
@@ -45,7 +56,7 @@ class CorrectnessMetric(BaseMetric):
             questions
         )
 
-        decision = laya_result["answers"]["correctness"]
+        decision = laya_result["answers"]["faithfulness"]
 
         diagnostic_results = {}
         for diagnostic in self.diagnostics:
@@ -58,7 +69,7 @@ class CorrectnessMetric(BaseMetric):
             score = self.scoring_strategy.calculate(decision)
 
         passed = None
-        
+
         if self.passing_strategy:
             passed = self.passing_strategy.check(
                 decision=decision,
@@ -67,7 +78,7 @@ class CorrectnessMetric(BaseMetric):
             )
 
         return EvaluationResult(
-            metric_name="correctness",
+            metric_name="faithfulness",
             score=score,
             passed=passed,
             label=decision["choice"],
