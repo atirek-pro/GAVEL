@@ -1,4 +1,4 @@
-from .base_metric import BaseMetric
+from ..base_metric import BaseMetric
 from models.laya_model import LayaModel
 from evaluation_result import EvaluationResult
 
