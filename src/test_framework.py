@@ -6,6 +6,9 @@ from metrics.rag_metrics.faithfulness import FaithfulnessMetric
 from metrics.rag_metrics.contextual_relevancy import ContextualRelevancyMetric
 from metrics.rag_metrics.contextual_recall import ContextualRecallMetric
 from metrics.rag_metrics.contextual_precision import ContextualPrecisionMetric
+from metrics.response_metrics.completeness import CompletenessMetric
+from metrics.response_metrics.coherence import CoherenceMetric
+from metrics.response_metrics.conciseness import ConcisenessMetric
 
 from scoring.max_probability import MaxProbability
 from scoring.expected_utility import ExpectedUtility
@@ -142,6 +145,100 @@ contextual_precision_buried_case = LLMEvaluationCase(
         "Customers can request a refund within 30 days.",
         "A valid refund request requires the original receipt."
     ]
+)
+
+# Completeness compares the generated answer against the expected answer
+# to judge how much of the required information is covered. It is a
+# response-quality metric, so it does not use retrieval_context.
+completeness_case = LLMEvaluationCase(
+    input="What are the requirements for applying for a loan?",
+    actual_output=(
+        "You need proof of income, valid identification, "
+        "and a credit score above 700."
+    ),
+    expected_output=(
+        "You need proof of income, valid identification, "
+        "and a credit score above 700."
+    )
+)
+
+completeness_partial_case = LLMEvaluationCase(
+    input="What are the requirements for applying for a loan?",
+    actual_output=(
+        "You need proof of income and valid identification."
+    ),
+    expected_output=(
+        "You need proof of income, valid identification, "
+        "and a credit score above 700."
+    )
+)
+
+completeness_incomplete_case = LLMEvaluationCase(
+    input="What are the requirements for applying for a loan?",
+    actual_output="You can apply online.",
+    expected_output=(
+        "You need proof of income, valid identification, "
+        "and a credit score above 700."
+    )
+)
+
+# Coherence and Conciseness evaluate the generated response itself, so
+# they only need the input and the actual answer (no expected_output).
+coherence_case = LLMEvaluationCase(
+    input="Why does the sky appear blue?",
+    actual_output=(
+        "Sunlight contains many colors. The atmosphere scatters blue "
+        "light more than red light, so scattered blue light reaches our "
+        "eyes and makes the sky look blue."
+    )
+)
+
+coherence_partial_case = LLMEvaluationCase(
+    input="Why does the sky appear blue?",
+    actual_output=(
+        "The sky is blue because of scattering and also the ocean is "
+        "blue, and some light has colors. Water reflects things. Blue "
+        "light scatters more, so therefore it is blue."
+    )
+)
+
+coherence_incoherent_case = LLMEvaluationCase(
+    input="Why does the sky appear blue?",
+    actual_output=(
+        "Blue because sky light scattering water ocean reflected. "
+        "However then so but the color therefore blue it is."
+    )
+)
+
+conciseness_case = LLMEvaluationCase(
+    input="How do I reset my password?",
+    actual_output=(
+        "Open Settings, select Security, choose Reset Password, and "
+        "follow the link sent to your email."
+    )
+)
+
+conciseness_partial_case = LLMEvaluationCase(
+    input="How do I reset my password?",
+    actual_output=(
+        "To reset your password, open Settings and select Security, then "
+        "choose Reset Password. As mentioned, you first open Settings and "
+        "select Security, and then choose the Reset Password option. "
+        "Finally, follow the emailed link."
+    )
+)
+
+conciseness_verbose_case = LLMEvaluationCase(
+    input="How do I reset my password?",
+    actual_output=(
+        "To reset your password, you should first open the application. "
+        "The application is the software you use on your device. Settings "
+        "is where configuration lives. Once in Settings, you will find "
+        "Security. Security contains many options, one of which is Reset "
+        "Password. You may also wish to consider whether you truly need to "
+        "reset your password, because passwords are important. Finally, "
+        "follow the emailed link, which is a link that is emailed to you."
+    )
 )
 
 
@@ -957,6 +1054,455 @@ def test_contextual_precision():
     print("\n========== CONTEXTUAL PRECISION TESTS PASSED ==========")
 
 
+def print_completeness_result(result):
+    print("\n========== COMPLETENESS EVALUATION ==========")
+    print()
+    print("Metric:", result.metric_name)
+    print("Label:", result.label)
+    print("Score:", result.score)
+    print("Passed:", result.passed)
+
+    print("\nDiagnostics:")
+    print(result.diagnostics)
+
+    print("\nProbabilities:")
+    print(result.details["probabilities"])
+
+
+def test_completeness():
+    print("\n========== COMPLETENESS METRIC TESTS ==========")
+
+    # Test 1 - Complete Answer
+    print("\n--- Completeness Test 1: Complete answer ---")
+
+    metric = CompletenessMetric(model=shared_model)
+
+    result = metric.measure(completeness_case)
+
+    assert result.metric_name == "completeness"
+    assert result.label in {"complete", "partially_complete", "incomplete"}
+    assert "probabilities" in result.details
+
+    print_completeness_result(result)
+
+    # Test 2 - Partially Complete Answer
+    print("\n--- Completeness Test 2: Partially complete answer ---")
+
+    metric = CompletenessMetric(model=shared_model)
+
+    result = metric.measure(completeness_partial_case)
+
+    assert result.label in {"complete", "partially_complete", "incomplete"}
+
+    print_completeness_result(result)
+
+    # Test 3 - Incomplete Answer
+    print("\n--- Completeness Test 3: Incomplete answer ---")
+
+    metric = CompletenessMetric(model=shared_model)
+
+    result = metric.measure(completeness_incomplete_case)
+
+    assert result.metric_name == "completeness"
+    assert result.label in {"complete", "partially_complete", "incomplete"}
+
+    print_completeness_result(result)
+
+    # Test 4 - ExpectedUtility
+    print("\n--- Completeness Test 4: ExpectedUtility ---")
+
+    metric = CompletenessMetric(
+        scoring_strategy=ExpectedUtility(
+            utilities={
+                "complete": 1.0,
+                "partially_complete": 0.5,
+                "incomplete": 0.0,
+            }
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(completeness_case)
+
+    assert result.score is not None
+    assert 0.0 <= result.score <= 1.0
+
+    print_completeness_result(result)
+
+    # Test 5 - ProbabilityOf
+    print("\n--- Completeness Test 5: ProbabilityOf('complete') ---")
+
+    metric = CompletenessMetric(
+        scoring_strategy=ProbabilityOf("complete"),
+        model=shared_model
+    )
+
+    result = metric.measure(completeness_case)
+
+    assert result.score == result.details["probabilities"]["complete"]
+
+    print_completeness_result(result)
+
+    # Test 6 - Margin diagnostic
+    print("\n--- Completeness Test 6: Margin diagnostic ---")
+
+    metric = CompletenessMetric(
+        scoring_strategy=MaxProbability(),
+        diagnostics=[
+            Margin()
+        ],
+        model=shared_model
+    )
+
+    result = metric.measure(completeness_case)
+
+    assert "Margin" in result.diagnostics
+    assert result.diagnostics["Margin"] >= 0
+
+    print_completeness_result(result)
+
+    # Test 7 - ScoreThreshold
+    print("\n--- Completeness Test 7: ScoreThreshold ---")
+
+    metric = CompletenessMetric(
+        scoring_strategy=MaxProbability(),
+        passing_strategy=ScoreThreshold(
+            threshold=0.5
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(completeness_case)
+
+    assert result.passed in (True, False)
+
+    print_completeness_result(result)
+
+    # Test 8 - LabelMatch
+    print("\n--- Completeness Test 8: LabelMatch ---")
+
+    metric = CompletenessMetric(
+        passing_strategy=LabelMatch(
+            expected_label="complete"
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(completeness_case)
+
+    assert result.passed in (True, False)
+
+    print_completeness_result(result)
+
+    # Test 9 - Missing expected output
+    print("\n--- Completeness Test 9: Missing expected_output ---")
+
+    metric = CompletenessMetric(model=shared_model)
+
+    missing_expected_case = LLMEvaluationCase(
+        input="What are the requirements for applying for a loan?",
+        actual_output="You need proof of income.",
+        expected_output=None
+    )
+
+    try:
+        metric.measure(missing_expected_case)
+    except ValueError as error:
+        assert str(error) == "CompletenessMetric requires expected_output."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "CompletenessMetric should raise ValueError "
+            "when expected_output is missing."
+        )
+
+    print("\n========== COMPLETENESS TESTS PASSED ==========")
+
+
+def print_coherence_result(result):
+    print("\n========== COHERENCE EVALUATION ==========")
+    print()
+    print("Metric:", result.metric_name)
+    print("Label:", result.label)
+    print("Score:", result.score)
+    print("Passed:", result.passed)
+
+    print("\nDiagnostics:")
+    print(result.diagnostics)
+
+    print("\nProbabilities:")
+    print(result.details["probabilities"])
+
+
+def test_coherence():
+    print("\n========== COHERENCE METRIC TESTS ==========")
+
+    # Test 1 - Clearly coherent answer
+    print("\n--- Coherence Test 1: Coherent answer ---")
+
+    metric = CoherenceMetric(model=shared_model)
+
+    result = metric.measure(coherence_case)
+
+    assert result.metric_name == "coherence"
+    assert result.label in {"coherent", "partially_coherent", "incoherent"}
+    assert "probabilities" in result.details
+
+    print_coherence_result(result)
+
+    # Test 2 - Partially coherent answer
+    print("\n--- Coherence Test 2: Partially coherent answer ---")
+
+    metric = CoherenceMetric(model=shared_model)
+
+    result = metric.measure(coherence_partial_case)
+
+    assert result.label in {"coherent", "partially_coherent", "incoherent"}
+
+    print_coherence_result(result)
+
+    # Test 3 - Incoherent answer
+    print("\n--- Coherence Test 3: Incoherent answer ---")
+
+    metric = CoherenceMetric(model=shared_model)
+
+    result = metric.measure(coherence_incoherent_case)
+
+    assert result.label in {"coherent", "partially_coherent", "incoherent"}
+
+    print_coherence_result(result)
+
+    # Test 4 - ExpectedUtility
+    print("\n--- Coherence Test 4: ExpectedUtility ---")
+
+    metric = CoherenceMetric(
+        scoring_strategy=ExpectedUtility(
+            utilities={
+                "coherent": 1.0,
+                "partially_coherent": 0.5,
+                "incoherent": 0.0,
+            }
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(coherence_case)
+
+    assert result.score is not None
+    assert 0.0 <= result.score <= 1.0
+
+    print_coherence_result(result)
+
+    # Test 5 - ProbabilityOf
+    print("\n--- Coherence Test 5: ProbabilityOf('coherent') ---")
+
+    metric = CoherenceMetric(
+        scoring_strategy=ProbabilityOf("coherent"),
+        model=shared_model
+    )
+
+    result = metric.measure(coherence_case)
+
+    assert result.score == result.details["probabilities"]["coherent"]
+
+    print_coherence_result(result)
+
+    # Test 6 - Margin diagnostic
+    print("\n--- Coherence Test 6: Margin diagnostic ---")
+
+    metric = CoherenceMetric(
+        scoring_strategy=MaxProbability(),
+        diagnostics=[
+            Margin()
+        ],
+        model=shared_model
+    )
+
+    result = metric.measure(coherence_case)
+
+    assert "Margin" in result.diagnostics
+    assert result.diagnostics["Margin"] >= 0
+
+    print_coherence_result(result)
+
+    # Test 7 - ScoreThreshold
+    print("\n--- Coherence Test 7: ScoreThreshold ---")
+
+    metric = CoherenceMetric(
+        scoring_strategy=MaxProbability(),
+        passing_strategy=ScoreThreshold(
+            threshold=0.5
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(coherence_case)
+
+    assert result.passed in (True, False)
+
+    print_coherence_result(result)
+
+    # Test 8 - LabelMatch
+    print("\n--- Coherence Test 8: LabelMatch ---")
+
+    metric = CoherenceMetric(
+        passing_strategy=LabelMatch(
+            expected_label="coherent"
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(coherence_case)
+
+    assert result.passed in (True, False)
+
+    print_coherence_result(result)
+
+    print("\n========== COHERENCE TESTS PASSED ==========")
+
+
+def print_conciseness_result(result):
+    print("\n========== CONCISENESS EVALUATION ==========")
+    print()
+    print("Metric:", result.metric_name)
+    print("Label:", result.label)
+    print("Score:", result.score)
+    print("Passed:", result.passed)
+
+    print("\nDiagnostics:")
+    print(result.diagnostics)
+
+    print("\nProbabilities:")
+    print(result.details["probabilities"])
+
+
+def test_conciseness():
+    print("\n========== CONCISENESS METRIC TESTS ==========")
+
+    # Test 1 - Clearly concise answer
+    print("\n--- Conciseness Test 1: Concise answer ---")
+
+    metric = ConcisenessMetric(model=shared_model)
+
+    result = metric.measure(conciseness_case)
+
+    assert result.metric_name == "conciseness"
+    assert result.label in {"concise", "partially_concise", "verbose"}
+    assert "probabilities" in result.details
+
+    print_conciseness_result(result)
+
+    # Test 2 - Partially concise answer
+    print("\n--- Conciseness Test 2: Partially concise answer ---")
+
+    metric = ConcisenessMetric(model=shared_model)
+
+    result = metric.measure(conciseness_partial_case)
+
+    assert result.label in {"concise", "partially_concise", "verbose"}
+
+    print_conciseness_result(result)
+
+    # Test 3 - Verbose answer
+    print("\n--- Conciseness Test 3: Verbose answer ---")
+
+    metric = ConcisenessMetric(model=shared_model)
+
+    result = metric.measure(conciseness_verbose_case)
+
+    assert result.label in {"concise", "partially_concise", "verbose"}
+
+    print_conciseness_result(result)
+
+    # Test 4 - ExpectedUtility
+    print("\n--- Conciseness Test 4: ExpectedUtility ---")
+
+    metric = ConcisenessMetric(
+        scoring_strategy=ExpectedUtility(
+            utilities={
+                "concise": 1.0,
+                "partially_concise": 0.5,
+                "verbose": 0.0,
+            }
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(conciseness_case)
+
+    assert result.score is not None
+    assert 0.0 <= result.score <= 1.0
+
+    print_conciseness_result(result)
+
+    # Test 5 - ProbabilityOf
+    print("\n--- Conciseness Test 5: ProbabilityOf('concise') ---")
+
+    metric = ConcisenessMetric(
+        scoring_strategy=ProbabilityOf("concise"),
+        model=shared_model
+    )
+
+    result = metric.measure(conciseness_case)
+
+    assert result.score == result.details["probabilities"]["concise"]
+
+    print_conciseness_result(result)
+
+    # Test 6 - Margin diagnostic
+    print("\n--- Conciseness Test 6: Margin diagnostic ---")
+
+    metric = ConcisenessMetric(
+        scoring_strategy=MaxProbability(),
+        diagnostics=[
+            Margin()
+        ],
+        model=shared_model
+    )
+
+    result = metric.measure(conciseness_case)
+
+    assert "Margin" in result.diagnostics
+    assert result.diagnostics["Margin"] >= 0
+
+    print_conciseness_result(result)
+
+    # Test 7 - ScoreThreshold
+    print("\n--- Conciseness Test 7: ScoreThreshold ---")
+
+    metric = ConcisenessMetric(
+        scoring_strategy=MaxProbability(),
+        passing_strategy=ScoreThreshold(
+            threshold=0.5
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(conciseness_case)
+
+    assert result.passed in (True, False)
+
+    print_conciseness_result(result)
+
+    # Test 8 - LabelMatch
+    print("\n--- Conciseness Test 8: LabelMatch ---")
+
+    metric = ConcisenessMetric(
+        passing_strategy=LabelMatch(
+            expected_label="concise"
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(conciseness_case)
+
+    assert result.passed in (True, False)
+
+    print_conciseness_result(result)
+
+    print("\n========== CONCISENESS TESTS PASSED ==========")
+
+
 def run_all():
     # ---------------------------------------------------------------
     # Existing correctness functionality (must still work)
@@ -1041,6 +1587,27 @@ def run_all():
     test_contextual_precision()
 
 
+    # ---------------------------------------------------------------
+    # Completeness tests
+    # ---------------------------------------------------------------
+
+    test_completeness()
+
+
+    # ---------------------------------------------------------------
+    # Coherence tests
+    # ---------------------------------------------------------------
+
+    test_coherence()
+
+
+    # ---------------------------------------------------------------
+    # Conciseness tests
+    # ---------------------------------------------------------------
+
+    test_conciseness()
+
+
     print("\n========== SUMMARY ==========")
     print("Correctness          [PASS]")
     print("Relevance            [PASS]")
@@ -1048,6 +1615,9 @@ def run_all():
     print("ContextualRelevancy  [PASS]")
     print("ContextualRecall     [PASS]")
     print("ContextualPrecision  [PASS]")
+    print("Completeness         [PASS]")
+    print("Coherence            [PASS]")
+    print("Conciseness          [PASS]")
 
     print("\n========== ALL TESTS PASSED ==========")
 
@@ -1066,5 +1636,11 @@ if __name__ == "__main__":
         test_contextual_recall()
     elif selection == "contextual_precision":
         test_contextual_precision()
+    elif selection == "completeness":
+        test_completeness()
+    elif selection == "coherence":
+        test_coherence()
+    elif selection == "conciseness":
+        test_conciseness()
     else:
         run_all()
