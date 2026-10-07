@@ -12,6 +12,10 @@ from metrics.response_metrics.conciseness import ConcisenessMetric
 from metrics.safety_metrics.toxicity import ToxicityMetric
 from metrics.safety_metrics.bias import BiasMetric
 from metrics.safety_metrics.hallucination import HallucinationMetric
+from metrics.agent_metrics.task_completion import TaskCompletionMetric
+from metrics.agent_metrics.tool_selection import ToolSelectionMetric
+from metrics.agent_metrics.tool_correctness import ToolCorrectnessMetric
+from metrics.agent_metrics.trajectory_evaluation import TrajectoryEvaluationMetric
 
 from scoring.max_probability import MaxProbability
 from scoring.expected_utility import ExpectedUtility
@@ -357,6 +361,327 @@ hallucination_paraphrase_case = LLMEvaluationCase(
     ),
     retrieval_context=[
         "Python was created by Guido van Rossum."
+    ]
+)
+
+# Task Completion evaluates the agent's final outcome against the expected
+# outcome, so it requires expected_output and does not use retrieval_context.
+task_completion_case = LLMEvaluationCase(
+    input="What is the capital of France?",
+    expected_output="The capital of France is Paris.",
+    actual_output="The capital of France is Paris."
+)
+
+task_completion_partial_case = LLMEvaluationCase(
+    input="Find the cheapest flight from Delhi to Bangalore and book it.",
+    expected_output=(
+        "The cheapest flight from Delhi to Bangalore is found and booked, "
+        "with a booking confirmation provided."
+    ),
+    actual_output="The cheapest flight is Flight X."
+)
+
+task_completion_not_case = LLMEvaluationCase(
+    input="Book a flight to Paris for next Monday.",
+    expected_output=(
+        "A flight to Paris for next Monday is booked and a confirmation "
+        "number is provided."
+    ),
+    actual_output="I was unable to complete the booking."
+)
+
+# Tool Selection evaluates whether the selected tool was appropriate for
+# the task, using available_tools and selected_tool.
+tool_selection_case = LLMEvaluationCase(
+    input="What is the current weather in Delhi?",
+    actual_output="The weather tool was selected.",
+    available_tools=[
+        "weather",
+        "calculator",
+        "web_search"
+    ],
+    selected_tool="weather"
+)
+
+tool_selection_partial_case = LLMEvaluationCase(
+    input="What is 18% of 250?",
+    actual_output="The web_search tool was selected.",
+    available_tools=[
+        "calculator",
+        "web_search"
+    ],
+    selected_tool="web_search"
+)
+
+tool_selection_inappropriate_case = LLMEvaluationCase(
+    input="What is the current weather in Delhi?",
+    actual_output="The calculator tool was selected.",
+    available_tools=[
+        "weather",
+        "calculator",
+        "web_search"
+    ],
+    selected_tool="calculator"
+)
+
+tool_selection_multi_case = LLMEvaluationCase(
+    input="What is the current weather in Delhi?",
+    actual_output="The web_search tool was selected.",
+    available_tools=[
+        "weather",
+        "calculator",
+        "web_search"
+    ],
+    selected_tool="web_search"
+)
+
+# Tool Correctness evaluates the arguments passed to the selected tool
+# against its structured definition, so it uses tool definitions.
+weather_tool_definition = {
+    "name": "weather",
+    "description": "Get the weather for a specific location.",
+    "parameters": {
+        "location": "The city for which weather should be retrieved."
+    }
+}
+
+weather_date_tool_definition = {
+    "name": "weather",
+    "description": "Get the weather for a specific location and date.",
+    "parameters": {
+        "location": "The city for which weather should be retrieved.",
+        "date": "The date for which weather should be retrieved."
+    }
+}
+
+currency_tool_definition = {
+    "name": "currency_converter",
+    "description": "Convert an amount from one currency to another.",
+    "parameters": {
+        "from_currency": "The currency to convert from.",
+        "to_currency": "The currency to convert to.",
+        "amount": "The amount to convert."
+    }
+}
+
+tool_correctness_case = LLMEvaluationCase(
+    input="What is the weather in Delhi?",
+    actual_output="The weather tool was called with location Delhi.",
+    available_tools=[
+        weather_tool_definition
+    ],
+    selected_tool="weather",
+    tool_arguments={
+        "location": "Delhi"
+    }
+)
+
+tool_correctness_wrong_case = LLMEvaluationCase(
+    input="What is the weather in Delhi?",
+    actual_output="The weather tool was called with location London.",
+    available_tools=[
+        weather_tool_definition
+    ],
+    selected_tool="weather",
+    tool_arguments={
+        "location": "London"
+    }
+)
+
+tool_correctness_missing_case = LLMEvaluationCase(
+    input="Get the weather for Delhi tomorrow.",
+    actual_output="The weather tool was called with location Delhi.",
+    available_tools=[
+        weather_date_tool_definition
+    ],
+    selected_tool="weather",
+    tool_arguments={
+        "location": "Delhi"
+    }
+)
+
+tool_correctness_contradict_case = LLMEvaluationCase(
+    input="Convert 100 USD to INR.",
+    actual_output="The currency converter was called.",
+    available_tools=[
+        currency_tool_definition
+    ],
+    selected_tool="currency_converter",
+    tool_arguments={
+        "from_currency": "USD",
+        "to_currency": "EUR",
+        "amount": 100
+    }
+)
+
+tool_correctness_semantic_case = LLMEvaluationCase(
+    input="What is the weather in New Delhi?",
+    actual_output="The weather tool was called with location Delhi.",
+    available_tools=[
+        weather_tool_definition
+    ],
+    selected_tool="weather",
+    tool_arguments={
+        "location": "Delhi"
+    }
+)
+
+# Trajectory Evaluation judges the ordered sequence of agent actions, so it
+# only needs the task and the trajectory (expected_output is optional).
+trajectory_case = LLMEvaluationCase(
+    input="What is the weather in Delhi?",
+    actual_output="The weather in Delhi is 28C.",
+    trajectory=[
+        {
+            "action": "tool_call",
+            "tool": "weather",
+            "arguments": {
+                "location": "Delhi"
+            }
+        },
+        {
+            "action": "final_response",
+            "content": "The weather in Delhi is 28C."
+        }
+    ]
+)
+
+trajectory_partial_case = LLMEvaluationCase(
+    input="What is the weather in Delhi?",
+    actual_output="The weather in Delhi is 28C.",
+    trajectory=[
+        {
+            "action": "tool_call",
+            "tool": "weather",
+            "arguments": {
+                "location": "Delhi"
+            }
+        },
+        {
+            "action": "tool_call",
+            "tool": "weather",
+            "arguments": {
+                "location": "Delhi"
+            }
+        },
+        {
+            "action": "final_response",
+            "content": "The weather in Delhi is 28C."
+        }
+    ]
+)
+
+trajectory_inappropriate_case = LLMEvaluationCase(
+    input="What is the weather in Delhi?",
+    actual_output="The weather is 50.",
+    trajectory=[
+        {
+            "action": "tool_call",
+            "tool": "calculator",
+            "arguments": {
+                "expression": "25 * 4"
+            }
+        },
+        {
+            "action": "tool_call",
+            "tool": "calculator",
+            "arguments": {
+                "expression": "100 / 2"
+            }
+        },
+        {
+            "action": "final_response",
+            "content": "The weather is 50."
+        }
+    ]
+)
+
+trajectory_missing_step_case = LLMEvaluationCase(
+    input="What is the weather in Delhi?",
+    actual_output="I will get back to you.",
+    trajectory=[
+        {
+            "action": "reasoning",
+            "content": "I should check the weather for Delhi."
+        },
+        {
+            "action": "final_response",
+            "content": "I will get back to you."
+        }
+    ]
+)
+
+trajectory_inefficient_case = LLMEvaluationCase(
+    input="What is the weather in Delhi?",
+    actual_output="The weather in Delhi is 28C.",
+    trajectory=[
+        {
+            "action": "tool_call",
+            "tool": "weather",
+            "arguments": {
+                "location": "Delhi"
+            }
+        },
+        {
+            "action": "tool_call",
+            "tool": "calculator",
+            "arguments": {
+                "expression": "1 + 1"
+            }
+        },
+        {
+            "action": "tool_call",
+            "tool": "weather",
+            "arguments": {
+                "location": "Delhi"
+            }
+        },
+        {
+            "action": "tool_call",
+            "tool": "web_search",
+            "arguments": {
+                "query": "unrelated trivia"
+            }
+        },
+        {
+            "action": "final_response",
+            "content": "The weather in Delhi is 28C."
+        }
+    ]
+)
+
+trajectory_multistep_case = LLMEvaluationCase(
+    input=(
+        "Find the price of a widget and calculate the total cost "
+        "for three units."
+    ),
+    actual_output="Three widgets cost 45.",
+    trajectory=[
+        {
+            "action": "tool_call",
+            "tool": "product_search",
+            "arguments": {
+                "query": "widget price"
+            }
+        },
+        {
+            "action": "tool_call",
+            "tool": "product_lookup",
+            "arguments": {
+                "product": "widget"
+            }
+        },
+        {
+            "action": "tool_call",
+            "tool": "calculator",
+            "arguments": {
+                "expression": "15 * 3"
+            }
+        },
+        {
+            "action": "final_response",
+            "content": "Three widgets cost 45."
+        }
     ]
 )
 
@@ -2292,6 +2617,1106 @@ def test_hallucination():
     print("\n========== HALLUCINATION TESTS PASSED ==========")
 
 
+def print_task_completion_result(result):
+    print("\n========== TASK COMPLETION EVALUATION ==========")
+    print()
+    print("Metric:", result.metric_name)
+    print("Label:", result.label)
+    print("Score:", result.score)
+    print("Passed:", result.passed)
+
+    print("\nDiagnostics:")
+    print(result.diagnostics)
+
+    print("\nProbabilities:")
+    print(result.details["probabilities"])
+
+
+def test_task_completion():
+    print("\n========== TASK COMPLETION METRIC TESTS ==========")
+
+    # Test 1 - Completed task
+    print("\n--- Task Completion Test 1: Completed task ---")
+
+    metric = TaskCompletionMetric(model=shared_model)
+
+    result = metric.measure(task_completion_case)
+
+    assert result.metric_name == "task_completion"
+    assert result.label in {
+        "completed",
+        "partially_completed",
+        "not_completed",
+    }
+    assert "probabilities" in result.details
+
+    print_task_completion_result(result)
+
+    # Test 2 - Partially completed task
+    print("\n--- Task Completion Test 2: Partially completed task ---")
+
+    metric = TaskCompletionMetric(model=shared_model)
+
+    result = metric.measure(task_completion_partial_case)
+
+    assert result.label in {
+        "completed",
+        "partially_completed",
+        "not_completed",
+    }
+
+    print_task_completion_result(result)
+
+    # Test 3 - Not completed
+    print("\n--- Task Completion Test 3: Not completed ---")
+
+    metric = TaskCompletionMetric(model=shared_model)
+
+    result = metric.measure(task_completion_not_case)
+
+    assert result.label in {
+        "completed",
+        "partially_completed",
+        "not_completed",
+    }
+
+    print_task_completion_result(result)
+
+    # Test 4 - ExpectedUtility
+    print("\n--- Task Completion Test 4: ExpectedUtility ---")
+
+    metric = TaskCompletionMetric(
+        scoring_strategy=ExpectedUtility(
+            utilities={
+                "completed": 1.0,
+                "partially_completed": 0.5,
+                "not_completed": 0.0,
+            }
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(task_completion_case)
+
+    assert result.score is not None
+    assert 0.0 <= result.score <= 1.0
+
+    print_task_completion_result(result)
+
+    # Test 5 - ProbabilityOf
+    print("\n--- Task Completion Test 5: ProbabilityOf('completed') ---")
+
+    metric = TaskCompletionMetric(
+        scoring_strategy=ProbabilityOf("completed"),
+        model=shared_model
+    )
+
+    result = metric.measure(task_completion_case)
+
+    assert result.score == result.details["probabilities"]["completed"]
+
+    print_task_completion_result(result)
+
+    # Test 6 - Margin diagnostic
+    print("\n--- Task Completion Test 6: Margin diagnostic ---")
+
+    metric = TaskCompletionMetric(
+        scoring_strategy=MaxProbability(),
+        diagnostics=[
+            Margin()
+        ],
+        model=shared_model
+    )
+
+    result = metric.measure(task_completion_case)
+
+    assert "Margin" in result.diagnostics
+    assert result.diagnostics["Margin"] >= 0
+
+    print_task_completion_result(result)
+
+    # Test 7 - ScoreThreshold
+    print("\n--- Task Completion Test 7: ScoreThreshold ---")
+
+    metric = TaskCompletionMetric(
+        scoring_strategy=MaxProbability(),
+        passing_strategy=ScoreThreshold(
+            threshold=0.5
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(task_completion_case)
+
+    assert result.passed in (True, False)
+
+    print_task_completion_result(result)
+
+    # Test 8 - LabelMatch
+    print("\n--- Task Completion Test 8: LabelMatch('completed') ---")
+
+    metric = TaskCompletionMetric(
+        passing_strategy=LabelMatch(
+            expected_label="completed"
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(task_completion_case)
+
+    assert result.passed in (True, False)
+
+    print_task_completion_result(result)
+
+    # Test 9 - AllowedLabels
+    print("\n--- Task Completion Test 9: AllowedLabels ---")
+
+    metric = TaskCompletionMetric(
+        passing_strategy=AllowedLabels(
+            allowed_labels=[
+                "completed",
+                "partially_completed"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(task_completion_case)
+
+    assert result.passed in (True, False)
+
+    print_task_completion_result(result)
+
+    # Test 10 - BlockedLabels
+    print("\n--- Task Completion Test 10: BlockedLabels ---")
+
+    metric = TaskCompletionMetric(
+        passing_strategy=BlockedLabels(
+            blocked_labels=[
+                "not_completed"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(task_completion_case)
+
+    assert result.passed in (True, False)
+
+    print_task_completion_result(result)
+
+    # Test 11 - Missing expected output
+    print("\n--- Task Completion Test 11: Missing expected_output ---")
+
+    metric = TaskCompletionMetric(model=shared_model)
+
+    missing_expected_case = LLMEvaluationCase(
+        input="Complete this task.",
+        actual_output="I could not complete the task."
+    )
+
+    try:
+        metric.measure(missing_expected_case)
+    except ValueError as error:
+        assert str(error) == "TaskCompletionMetric requires expected_output."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "TaskCompletionMetric should raise ValueError "
+            "when expected_output is missing."
+        )
+
+    print("\n========== TASK COMPLETION TESTS PASSED ==========")
+
+
+def print_tool_selection_result(result):
+    print("\n========== TOOL SELECTION EVALUATION ==========")
+    print()
+    print("Metric:", result.metric_name)
+    print("Label:", result.label)
+    print("Score:", result.score)
+    print("Passed:", result.passed)
+
+    print("\nDiagnostics:")
+    print(result.diagnostics)
+
+    print("\nProbabilities:")
+    print(result.details["probabilities"])
+
+
+def test_tool_selection():
+    print("\n========== TOOL SELECTION METRIC TESTS ==========")
+
+    # Test 1 - Appropriate tool
+    print("\n--- Tool Selection Test 1: Appropriate tool ---")
+
+    metric = ToolSelectionMetric(model=shared_model)
+
+    result = metric.measure(tool_selection_case)
+
+    assert result.metric_name == "tool_selection"
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+    assert "probabilities" in result.details
+
+    print_tool_selection_result(result)
+
+    # Test 2 - Partially appropriate tool
+    print("\n--- Tool Selection Test 2: Partially appropriate tool ---")
+
+    metric = ToolSelectionMetric(model=shared_model)
+
+    result = metric.measure(tool_selection_partial_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_tool_selection_result(result)
+
+    # Test 3 - Inappropriate tool
+    print("\n--- Tool Selection Test 3: Inappropriate tool ---")
+
+    metric = ToolSelectionMetric(model=shared_model)
+
+    result = metric.measure(tool_selection_inappropriate_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_tool_selection_result(result)
+
+    # Test 4 - Multiple tools
+    print("\n--- Tool Selection Test 4: Multiple available tools ---")
+
+    metric = ToolSelectionMetric(model=shared_model)
+
+    result = metric.measure(tool_selection_multi_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_tool_selection_result(result)
+
+    # Test 5 - ExpectedUtility
+    print("\n--- Tool Selection Test 5: ExpectedUtility ---")
+
+    metric = ToolSelectionMetric(
+        scoring_strategy=ExpectedUtility(
+            utilities={
+                "appropriate": 1.0,
+                "partially_appropriate": 0.5,
+                "inappropriate": 0.0,
+            }
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_selection_case)
+
+    assert result.score is not None
+    assert 0.0 <= result.score <= 1.0
+
+    print_tool_selection_result(result)
+
+    # Test 6 - ProbabilityOf
+    print("\n--- Tool Selection Test 6: ProbabilityOf('appropriate') ---")
+
+    metric = ToolSelectionMetric(
+        scoring_strategy=ProbabilityOf("appropriate"),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_selection_case)
+
+    assert result.score == result.details["probabilities"]["appropriate"]
+
+    print_tool_selection_result(result)
+
+    # Test 7 - Margin diagnostic
+    print("\n--- Tool Selection Test 7: Margin diagnostic ---")
+
+    metric = ToolSelectionMetric(
+        scoring_strategy=MaxProbability(),
+        diagnostics=[
+            Margin()
+        ],
+        model=shared_model
+    )
+
+    result = metric.measure(tool_selection_case)
+
+    assert "Margin" in result.diagnostics
+    assert result.diagnostics["Margin"] >= 0
+
+    print_tool_selection_result(result)
+
+    # Test 8 - ScoreThreshold
+    print("\n--- Tool Selection Test 8: ScoreThreshold ---")
+
+    metric = ToolSelectionMetric(
+        scoring_strategy=MaxProbability(),
+        passing_strategy=ScoreThreshold(
+            threshold=0.5
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_selection_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_selection_result(result)
+
+    # Test 9 - LabelMatch
+    print("\n--- Tool Selection Test 9: LabelMatch('appropriate') ---")
+
+    metric = ToolSelectionMetric(
+        passing_strategy=LabelMatch(
+            expected_label="appropriate"
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_selection_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_selection_result(result)
+
+    # Test 10 - AllowedLabels
+    print("\n--- Tool Selection Test 10: AllowedLabels ---")
+
+    metric = ToolSelectionMetric(
+        passing_strategy=AllowedLabels(
+            allowed_labels=[
+                "appropriate",
+                "partially_appropriate"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_selection_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_selection_result(result)
+
+    # Test 11 - BlockedLabels
+    print("\n--- Tool Selection Test 11: BlockedLabels ---")
+
+    metric = ToolSelectionMetric(
+        passing_strategy=BlockedLabels(
+            blocked_labels=[
+                "inappropriate"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_selection_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_selection_result(result)
+
+    # Test 12 - Missing available tools
+    print("\n--- Tool Selection Test 12: Missing available_tools ---")
+
+    metric = ToolSelectionMetric(model=shared_model)
+
+    missing_tools_case = LLMEvaluationCase(
+        input="What is the weather?",
+        actual_output="The weather tool was selected.",
+        selected_tool="weather"
+    )
+
+    try:
+        metric.measure(missing_tools_case)
+    except ValueError as error:
+        assert str(error) == "ToolSelectionMetric requires available_tools."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "ToolSelectionMetric should raise ValueError "
+            "when available_tools is missing."
+        )
+
+    # Test 13 - Missing selected tool
+    print("\n--- Tool Selection Test 13: Missing selected_tool ---")
+
+    metric = ToolSelectionMetric(model=shared_model)
+
+    missing_selected_case = LLMEvaluationCase(
+        input="What is the weather?",
+        actual_output="No tool was selected.",
+        available_tools=[
+            "weather",
+            "calculator"
+        ]
+    )
+
+    try:
+        metric.measure(missing_selected_case)
+    except ValueError as error:
+        assert str(error) == "ToolSelectionMetric requires selected_tool."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "ToolSelectionMetric should raise ValueError "
+            "when selected_tool is missing."
+        )
+
+    print("\n========== TOOL SELECTION TESTS PASSED ==========")
+
+
+def print_tool_correctness_result(result):
+    print("\n========== TOOL CORRECTNESS EVALUATION ==========")
+    print()
+    print("Metric:", result.metric_name)
+    print("Label:", result.label)
+    print("Score:", result.score)
+    print("Passed:", result.passed)
+
+    print("\nDiagnostics:")
+    print(result.diagnostics)
+
+    print("\nProbabilities:")
+    print(result.details["probabilities"])
+
+
+def test_tool_correctness():
+    print("\n========== TOOL CORRECTNESS METRIC TESTS ==========")
+
+    # Test 1 - Correct tool arguments
+    print("\n--- Tool Correctness Test 1: Correct arguments ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    result = metric.measure(tool_correctness_case)
+
+    assert result.metric_name == "tool_correctness"
+    assert result.label in {
+        "correct",
+        "partially_correct",
+        "incorrect",
+    }
+    assert "probabilities" in result.details
+
+    print_tool_correctness_result(result)
+
+    # Test 2 - Incorrect argument value
+    print("\n--- Tool Correctness Test 2: Incorrect argument value ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    result = metric.measure(tool_correctness_wrong_case)
+
+    assert result.label in {
+        "correct",
+        "partially_correct",
+        "incorrect",
+    }
+
+    print_tool_correctness_result(result)
+
+    # Test 3 - Missing required argument
+    print("\n--- Tool Correctness Test 3: Missing required argument ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    result = metric.measure(tool_correctness_missing_case)
+
+    assert result.label in {
+        "correct",
+        "partially_correct",
+        "incorrect",
+    }
+
+    print_tool_correctness_result(result)
+
+    # Test 4 - Completely incorrect arguments
+    print("\n--- Tool Correctness Test 4: Contradictory arguments ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    result = metric.measure(tool_correctness_contradict_case)
+
+    assert result.label in {
+        "correct",
+        "partially_correct",
+        "incorrect",
+    }
+
+    print_tool_correctness_result(result)
+
+    # Test 5 - Semantic argument correctness
+    print("\n--- Tool Correctness Test 5: Semantic argument match ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    result = metric.measure(tool_correctness_semantic_case)
+
+    assert result.label in {
+        "correct",
+        "partially_correct",
+        "incorrect",
+    }
+
+    print_tool_correctness_result(result)
+
+    # Test 6 - ExpectedUtility
+    print("\n--- Tool Correctness Test 6: ExpectedUtility ---")
+
+    metric = ToolCorrectnessMetric(
+        scoring_strategy=ExpectedUtility(
+            utilities={
+                "correct": 1.0,
+                "partially_correct": 0.5,
+                "incorrect": 0.0,
+            }
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_correctness_case)
+
+    assert result.score is not None
+    assert 0.0 <= result.score <= 1.0
+
+    print_tool_correctness_result(result)
+
+    # Test 7 - ProbabilityOf
+    print("\n--- Tool Correctness Test 7: ProbabilityOf('correct') ---")
+
+    metric = ToolCorrectnessMetric(
+        scoring_strategy=ProbabilityOf("correct"),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_correctness_case)
+
+    assert result.score == result.details["probabilities"]["correct"]
+
+    print_tool_correctness_result(result)
+
+    # Test 8 - Margin diagnostic
+    print("\n--- Tool Correctness Test 8: Margin diagnostic ---")
+
+    metric = ToolCorrectnessMetric(
+        scoring_strategy=MaxProbability(),
+        diagnostics=[
+            Margin()
+        ],
+        model=shared_model
+    )
+
+    result = metric.measure(tool_correctness_case)
+
+    assert "Margin" in result.diagnostics
+    assert result.diagnostics["Margin"] >= 0
+
+    print_tool_correctness_result(result)
+
+    # Test 9 - ScoreThreshold
+    print("\n--- Tool Correctness Test 9: ScoreThreshold ---")
+
+    metric = ToolCorrectnessMetric(
+        scoring_strategy=MaxProbability(),
+        passing_strategy=ScoreThreshold(
+            threshold=0.5
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_correctness_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_correctness_result(result)
+
+    # Test 10 - LabelMatch
+    print("\n--- Tool Correctness Test 10: LabelMatch('correct') ---")
+
+    metric = ToolCorrectnessMetric(
+        passing_strategy=LabelMatch(
+            expected_label="correct"
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_correctness_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_correctness_result(result)
+
+    # Test 11 - AllowedLabels
+    print("\n--- Tool Correctness Test 11: AllowedLabels ---")
+
+    metric = ToolCorrectnessMetric(
+        passing_strategy=AllowedLabels(
+            allowed_labels=[
+                "correct",
+                "partially_correct"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_correctness_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_correctness_result(result)
+
+    # Test 12 - BlockedLabels
+    print("\n--- Tool Correctness Test 12: BlockedLabels ---")
+
+    metric = ToolCorrectnessMetric(
+        passing_strategy=BlockedLabels(
+            blocked_labels=[
+                "incorrect"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(tool_correctness_case)
+
+    assert result.passed in (True, False)
+
+    print_tool_correctness_result(result)
+
+    # Test 13 - Missing selected tool
+    print("\n--- Tool Correctness Test 13: Missing selected_tool ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    missing_selected_case = LLMEvaluationCase(
+        input="What is the weather in Delhi?",
+        actual_output="No tool was selected.",
+        available_tools=[
+            weather_tool_definition
+        ],
+        tool_arguments={
+            "location": "Delhi"
+        }
+    )
+
+    try:
+        metric.measure(missing_selected_case)
+    except ValueError as error:
+        assert str(error) == "ToolCorrectnessMetric requires selected_tool."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "ToolCorrectnessMetric should raise ValueError "
+            "when selected_tool is missing."
+        )
+
+    # Test 14 - Missing available tools
+    print("\n--- Tool Correctness Test 14: Missing available_tools ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    missing_tools_case = LLMEvaluationCase(
+        input="What is the weather in Delhi?",
+        actual_output="The weather tool was called.",
+        selected_tool="weather",
+        tool_arguments={
+            "location": "Delhi"
+        }
+    )
+
+    try:
+        metric.measure(missing_tools_case)
+    except ValueError as error:
+        assert str(error) == "ToolCorrectnessMetric requires available_tools."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "ToolCorrectnessMetric should raise ValueError "
+            "when available_tools is missing."
+        )
+
+    # Test 15 - Missing tool arguments
+    print("\n--- Tool Correctness Test 15: Missing tool_arguments ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    missing_arguments_case = LLMEvaluationCase(
+        input="What is the weather in Delhi?",
+        actual_output="The weather tool was called.",
+        available_tools=[
+            weather_tool_definition
+        ],
+        selected_tool="weather",
+        tool_arguments=None
+    )
+
+    try:
+        metric.measure(missing_arguments_case)
+    except ValueError as error:
+        assert str(error) == "ToolCorrectnessMetric requires tool_arguments."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "ToolCorrectnessMetric should raise ValueError "
+            "when tool_arguments is missing."
+        )
+
+    # Test 16 - Unknown selected tool
+    print("\n--- Tool Correctness Test 16: Unknown selected tool ---")
+
+    metric = ToolCorrectnessMetric(model=shared_model)
+
+    unknown_tool_case = LLMEvaluationCase(
+        input="What is the weather in Delhi?",
+        actual_output="An unknown tool was called.",
+        available_tools=[
+            weather_tool_definition
+        ],
+        selected_tool="unknown_tool",
+        tool_arguments={
+            "location": "Delhi"
+        }
+    )
+
+    try:
+        metric.measure(unknown_tool_case)
+    except ValueError as error:
+        assert str(error) == "Selected tool definition not found in available_tools."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "ToolCorrectnessMetric should raise ValueError "
+            "when the selected tool definition is not found."
+        )
+
+    print("\n========== TOOL CORRECTNESS TESTS PASSED ==========")
+
+
+def print_trajectory_evaluation_result(result):
+    print("\n========== TRAJECTORY EVALUATION EVALUATION ==========")
+    print()
+    print("Metric:", result.metric_name)
+    print("Label:", result.label)
+    print("Score:", result.score)
+    print("Passed:", result.passed)
+
+    print("\nDiagnostics:")
+    print(result.diagnostics)
+
+    print("\nProbabilities:")
+    print(result.details["probabilities"])
+
+
+def test_trajectory_evaluation():
+    print("\n========== TRAJECTORY EVALUATION METRIC TESTS ==========")
+
+    # Test 1 - Appropriate simple trajectory
+    print("\n--- Trajectory Evaluation Test 1: Appropriate trajectory ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    result = metric.measure(trajectory_case)
+
+    assert result.metric_name == "trajectory_evaluation"
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+    assert "probabilities" in result.details
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 2 - Partially appropriate trajectory
+    print("\n--- Trajectory Evaluation Test 2: Partially appropriate ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    result = metric.measure(trajectory_partial_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 3 - Inappropriate trajectory
+    print("\n--- Trajectory Evaluation Test 3: Inappropriate trajectory ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    result = metric.measure(trajectory_inappropriate_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 4 - Missing critical step
+    print("\n--- Trajectory Evaluation Test 4: Missing critical step ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    result = metric.measure(trajectory_missing_step_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 5 - Inefficient trajectory
+    print("\n--- Trajectory Evaluation Test 5: Inefficient trajectory ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    result = metric.measure(trajectory_inefficient_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 6 - Sensible multi-step trajectory
+    print("\n--- Trajectory Evaluation Test 6: Sensible multi-step ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    result = metric.measure(trajectory_multistep_case)
+
+    assert result.label in {
+        "appropriate",
+        "partially_appropriate",
+        "inappropriate",
+    }
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 7 - ExpectedUtility
+    print("\n--- Trajectory Evaluation Test 7: ExpectedUtility ---")
+
+    metric = TrajectoryEvaluationMetric(
+        scoring_strategy=ExpectedUtility(
+            utilities={
+                "appropriate": 1.0,
+                "partially_appropriate": 0.5,
+                "inappropriate": 0.0,
+            }
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(trajectory_case)
+
+    assert result.score is not None
+    assert 0.0 <= result.score <= 1.0
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 8 - ProbabilityOf
+    print("\n--- Trajectory Evaluation Test 8: ProbabilityOf('appropriate') ---")
+
+    metric = TrajectoryEvaluationMetric(
+        scoring_strategy=ProbabilityOf("appropriate"),
+        model=shared_model
+    )
+
+    result = metric.measure(trajectory_case)
+
+    assert result.score == result.details["probabilities"]["appropriate"]
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 9 - Margin diagnostic
+    print("\n--- Trajectory Evaluation Test 9: Margin diagnostic ---")
+
+    metric = TrajectoryEvaluationMetric(
+        scoring_strategy=MaxProbability(),
+        diagnostics=[
+            Margin()
+        ],
+        model=shared_model
+    )
+
+    result = metric.measure(trajectory_case)
+
+    assert "Margin" in result.diagnostics
+    assert result.diagnostics["Margin"] >= 0
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 10 - ScoreThreshold
+    print("\n--- Trajectory Evaluation Test 10: ScoreThreshold ---")
+
+    metric = TrajectoryEvaluationMetric(
+        scoring_strategy=MaxProbability(),
+        passing_strategy=ScoreThreshold(
+            threshold=0.5
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(trajectory_case)
+
+    assert result.passed in (True, False)
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 11 - LabelMatch
+    print("\n--- Trajectory Evaluation Test 11: LabelMatch('appropriate') ---")
+
+    metric = TrajectoryEvaluationMetric(
+        passing_strategy=LabelMatch(
+            expected_label="appropriate"
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(trajectory_case)
+
+    assert result.passed in (True, False)
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 12 - AllowedLabels
+    print("\n--- Trajectory Evaluation Test 12: AllowedLabels ---")
+
+    metric = TrajectoryEvaluationMetric(
+        passing_strategy=AllowedLabels(
+            allowed_labels=[
+                "appropriate",
+                "partially_appropriate"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(trajectory_case)
+
+    assert result.passed in (True, False)
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 13 - BlockedLabels
+    print("\n--- Trajectory Evaluation Test 13: BlockedLabels ---")
+
+    metric = TrajectoryEvaluationMetric(
+        passing_strategy=BlockedLabels(
+            blocked_labels=[
+                "inappropriate"
+            ]
+        ),
+        model=shared_model
+    )
+
+    result = metric.measure(trajectory_case)
+
+    assert result.passed in (True, False)
+
+    print_trajectory_evaluation_result(result)
+
+    # Test 14 - Missing trajectory
+    print("\n--- Trajectory Evaluation Test 14: Missing trajectory ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    missing_trajectory_case = LLMEvaluationCase(
+        input="What is the weather?",
+        actual_output="The weather is sunny.",
+        trajectory=[]
+    )
+
+    try:
+        metric.measure(missing_trajectory_case)
+    except ValueError as error:
+        assert str(error) == "TrajectoryEvaluationMetric requires trajectory."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "TrajectoryEvaluationMetric should raise ValueError "
+            "when trajectory is missing."
+        )
+
+    # Malformed entries - non-dictionary
+    print("\n--- Trajectory Evaluation: Non-dictionary entry ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    malformed_entry_case = LLMEvaluationCase(
+        input="What is the weather?",
+        actual_output="The weather is sunny.",
+        trajectory=[
+            "not a dictionary"
+        ]
+    )
+
+    try:
+        metric.measure(malformed_entry_case)
+    except ValueError as error:
+        assert str(error) == "Trajectory entries must be dictionaries."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "TrajectoryEvaluationMetric should raise ValueError "
+            "when a trajectory entry is not a dictionary."
+        )
+
+    # Malformed entries - missing 'action' field
+    print("\n--- Trajectory Evaluation: Entry missing 'action' ---")
+
+    metric = TrajectoryEvaluationMetric(model=shared_model)
+
+    missing_action_case = LLMEvaluationCase(
+        input="What is the weather?",
+        actual_output="The weather is sunny.",
+        trajectory=[
+            {
+                "tool": "weather"
+            }
+        ]
+    )
+
+    try:
+        metric.measure(missing_action_case)
+    except ValueError as error:
+        assert str(error) == "Each trajectory entry must contain an 'action' field."
+        print("\nRaised expected ValueError:", error)
+    else:
+        raise AssertionError(
+            "TrajectoryEvaluationMetric should raise ValueError "
+            "when a trajectory entry lacks an 'action' field."
+        )
+
+    print("\n========== TRAJECTORY EVALUATION TESTS PASSED ==========")
+
+
 def run_all():
     # ---------------------------------------------------------------
     # Existing correctness functionality (must still work)
@@ -2418,6 +3843,34 @@ def run_all():
     test_hallucination()
 
 
+    # ---------------------------------------------------------------
+    # Task Completion tests
+    # ---------------------------------------------------------------
+
+    test_task_completion()
+
+
+    # ---------------------------------------------------------------
+    # Tool Selection tests
+    # ---------------------------------------------------------------
+
+    test_tool_selection()
+
+
+    # ---------------------------------------------------------------
+    # Tool Correctness tests
+    # ---------------------------------------------------------------
+
+    test_tool_correctness()
+
+
+    # ---------------------------------------------------------------
+    # Trajectory Evaluation tests
+    # ---------------------------------------------------------------
+
+    test_trajectory_evaluation()
+
+
     print("\n========== SUMMARY ==========")
     print("Correctness          [PASS]")
     print("Relevance            [PASS]")
@@ -2431,6 +3884,10 @@ def run_all():
     print("Toxicity             [PASS]")
     print("Bias                 [PASS]")
     print("Hallucination        [PASS]")
+    print("TaskCompletion       [PASS]")
+    print("ToolSelection        [PASS]")
+    print("ToolCorrectness      [PASS]")
+    print("TrajectoryEvaluation [PASS]")
 
     print("\n========== ALL TESTS PASSED ==========")
 
@@ -2461,5 +3918,13 @@ if __name__ == "__main__":
         test_bias()
     elif selection == "hallucination":
         test_hallucination()
+    elif selection == "task_completion":
+        test_task_completion()
+    elif selection == "tool_selection":
+        test_tool_selection()
+    elif selection == "tool_correctness":
+        test_tool_correctness()
+    elif selection == "trajectory_evaluation":
+        test_trajectory_evaluation()
     else:
         run_all()
