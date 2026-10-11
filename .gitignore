@@ -1,4 +1,5 @@
-myenv/
+GAVEL-env/
 .commandcode/
 __pycache__
 resume-with.txt
+src/fine-tuning-laya/dataset/
